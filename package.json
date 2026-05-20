@@ -1,0 +1,26 @@
+{
+  "name": "wa-checker-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp Number Checker Bot via Telegram + Baileys",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "axios": "^1.6.8",
+    "baileys": "7.0.0-rc11",
+    "dotenv": "^16.4.5",
+    "moment-timezone": "^0.5.45",
+    "node-telegram-bot-api": "^0.67.0",
+    "pino": "^8.19.0",
+    "qrcode": "^1.5.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

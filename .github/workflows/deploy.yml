@@ -1,0 +1,78 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches: [main]
+
+env:
+  RAILWAY_API: https://backboard.railway.com/graphql/v2
+  PROXY: socks5://fjAeZIH6TB00_custom_zone_SG_st__city_sid_43816307_time_null:3191445@change4.owlproxy.com:7778
+  SERVICE_ID: fd6000f3-e08b-4ee1-9011-189d428fbcea
+  ENV_ID: 8d1d6c4b-88ac-453c-b19a-120ef4d527db
+  PROJECT_ID: 9b658151-d77e-4ed5-a958-8ba100c9b546
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set builder to RAILPACK and reset source
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          echo "Setting builder to RAILPACK..."
+          curl -sf --max-time 30 -x "$PROXY" \
+            -X POST "$RAILWAY_API" \
+            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"query\":\"mutation { serviceInstanceUpdate(serviceId: \\\"$SERVICE_ID\\\", environmentId: \\\"$ENV_ID\\\", input: { builder: RAILPACK, source: { repo: \\\"giovanniazhari-prog/wa-checker-bot\\\" } }) }\"}" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print('Update result:', d)"
+
+      - name: Trigger Railway deployment (60s timeout)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          echo "Triggering deployment..."
+          RESULT=$(curl -sf --max-time 60 -x "$PROXY" \
+            -X POST "$RAILWAY_API" \
+            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"query\":\"mutation { serviceInstanceDeploy(serviceId: \\\"$SERVICE_ID\\\", environmentId: \\\"$ENV_ID\\\") }\"}" 2>&1) || {
+              echo "curl exit $? — deploy may still be queued, continuing to poll..."
+            }
+          echo "Deploy result: $RESULT"
+
+      - name: Poll deployment status (up to 8 min)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          for i in $(seq 1 48); do
+            sleep 10
+            STATUS=$(curl -sf --max-time 20 -x "$PROXY" \
+              -X POST "$RAILWAY_API" \
+              -H "Authorization: Bearer $RAILWAY_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"query\":\"{ project(id: \\\"$PROJECT_ID\\\") { deployments(first: 1) { edges { node { status url meta } } } } }\"}" \
+              | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          node = d['data']['project']['deployments']['edges'][0]['node']
+          commit = (node.get('meta') or {}).get('commitHash', '?')[:8]
+          builder = ((node.get('meta') or {}).get('serviceManifest') or {}).get('build', {}).get('builder', '?')
+          print(node['status'] + '|' + (node.get('url') or '-') + '|' + commit + '|' + builder)
+          " 2>/dev/null || echo "POLLING_ERROR|-|-|-")
+            STATE=$(echo "$STATUS"   | cut -d'|' -f1)
+            URL=$(echo "$STATUS"     | cut -d'|' -f2)
+            HASH=$(echo "$STATUS"    | cut -d'|' -f3)
+            BUILDER=$(echo "$STATUS" | cut -d'|' -f4)
+            echo "[$i] $STATE | builder: $BUILDER | commit: $HASH | url: $URL"
+            if [ "$STATE" = "SUCCESS" ]; then
+              echo "Bot deployed successfully! URL: $URL"
+              exit 0
+            fi
+            if [ "$STATE" = "FAILED" ] || [ "$STATE" = "CRASHED" ]; then
+              echo "Deployment failed — check Railway dashboard for build logs"
+              exit 1
+            fi
+          done
+          echo "Timed out after 8 minutes"
+          exit 1
